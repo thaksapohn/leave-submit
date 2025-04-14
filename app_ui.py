@@ -15,12 +15,12 @@ LEAVE_TYPES = {
 }
 
 COLOR_MAP = {
-    "sick": ft.colors.RED_200,
-    "vacation": ft.colors.GREEN_200,
-    "personal": ft.colors.YELLOW_200,
-    "holiday": ft.colors.BLUE_200,
-    "today": ft.colors.PURPLE_300,
-    "selected": ft.colors.ORANGE_200
+    "sick": ft.Colors.RED_200,
+    "vacation": ft.Colors.GREEN_200,
+    "personal": ft.Colors.YELLOW_200,
+    "holiday": ft.Colors.BLUE_200,
+    "today": ft.Colors.PURPLE_300,
+    "selected": ft.Colors.ORANGE_200
 }
 
 def get_month_label(month):
@@ -30,66 +30,101 @@ def get_month_label(month):
     ]
     return month_th[month - 1]
 
-def main(page: ft.Page):
-    today = datetime.today()
-    current_year = today.year
-    current_month = today.month
 
-    selected_date = ft.Text("")
-    calendar_rows = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True)
-    leave_summary = ft.Row(wrap=True, spacing=10, run_spacing=10, alignment=ft.MainAxisAlignment.CENTER)
-    header_text = ft.Text(f"{get_month_label(current_month)} {current_year}", size=16)
-    
-    # Cache
-    leaves = []
-    holidays = []
-    quotas = []
+class QuotaPopup(ft.AlertDialog):
+    def __init__(self, quotas, on_submit):
+        self.inputs = [(q["type"], ft.TextField(label=f"{LEAVE_TYPES[q['type']]} (วัน)", value=str(q["total"]))) for q in quotas]
 
-    leave_type_dd = ft.Dropdown(
-        label="ประเภทการลา",
-        options=[ft.dropdown.Option(k, text=v) for k, v in LEAVE_TYPES.items()]
-    )
-    reason_tf = ft.TextField(label="เหตุผล")
-    holiday_name = ft.TextField(label="ชื่อวันหยุด")
+        # Header row with close button
+        header_row = ft.Row(
+            controls=[
+                ft.Text("อัปเดตโควต้าการลา", size=16, weight="bold", expand=True),
+                ft.IconButton(icon=ft.Icons.CLOSE, on_click=self._close)
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+        )
 
-    def fetch_table(table):
+        super().__init__(
+            modal=True,
+            content=ft.Column([header_row] + [inp[1] for inp in self.inputs], tight=True),
+            actions=[
+                ft.TextButton("ยืนยัน", on_click=lambda e: on_submit(self.inputs)),
+                ft.TextButton("ยกเลิก", on_click=self._close)
+            ]
+        )
+
+    def _close(self, e=None):
+        self.open = False
+        if hasattr(self, "page"):
+            self.page.update()
+
+
+class LeaveApp:
+    def __init__(self, page: ft.Page):
+        self.page = page
+        self.today = datetime.today()
+        self.current_year = self.today.year
+        self.current_month = self.today.month
+        self.selected_date = ft.Text("")
+        self.leaves = []
+        self.holidays = []
+        self.quotas = []
+        self.data_loaded = False
+        self.calendar_rows = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True)
+        self.leave_summary = ft.Row(wrap=True, spacing=10, run_spacing=10, alignment=ft.MainAxisAlignment.CENTER)
+        self.header_text = ft.Text(size=16)
+        self.leave_type_dd = ft.Dropdown(label="ประเภทการลา", options=[ft.dropdown.Option(k, text=v) for k, v in LEAVE_TYPES.items()])
+        self.reason_tf = ft.TextField(label="เหตุผล", expand=True)
+        self.holiday_name = ft.TextField(label="ชื่อวันหยุด", expand=True)
+
+    def fetch_table(self, table):
         return supabase.table(table).select("*").execute().data
 
-    def load_data():
-        nonlocal leaves, holidays, quotas
-        leaves = fetch_table("leaves")
-        holidays = fetch_table("holidays")
-        quotas = fetch_table("leave_quota")
+    def load_data(self):
+        if not self.data_loaded:
+            self.leaves = self.fetch_table("leaves")
+            self.holidays = self.fetch_table("holidays")
+            self.quotas = self.fetch_table("leave_quota")
+            self.data_loaded = True
 
-    def save_leave(date, leave_type, reason):
+    def reload_data(self):
+        self.leaves = self.fetch_table("leaves")
+        self.holidays = self.fetch_table("holidays")
+        self.quotas = self.fetch_table("leave_quota")
+
+    def save_leave(self, date, leave_type, reason):
         supabase.table("leaves").insert({
             "date": date.isoformat(),
             "type": leave_type,
             "reason": reason
         }).execute()
-        load_data()
+        # self.load_data()
+        self.reload_data()
 
-    def save_holiday(date, name):
+    def save_holiday(self, date, name):
         supabase.table("holidays").insert({
             "date": date.isoformat(),
             "name": name
         }).execute()
-        load_data()
+        # self.load_data()
+        self.reload_data()
 
-    def update_quota(type_, total):
+    def update_quota(self, type_, total):
         supabase.table("leave_quota").upsert({"type": type_, "total": total}).execute()
-        load_data()
+        # self.load_data()
+        self.reload_data()
 
-    def build_calendar(year, month):
-        calendar_rows.controls.clear()
-        first_day = datetime(year, month, 1)
+    def build_calendar(self):
+
+        self.calendar_rows.controls.clear()
+        first_day = datetime(self.current_year, self.current_month, 1)
         start_day = first_day - timedelta(days=(first_day.weekday() + 1) % 7)
 
-        day_size = (page.width - 6 * 10 - 40) / 7
+        day_size = (self.page.width - 6 * 10 - 40) / 7
 
         header = [
             ft.Container(
-                content=ft.Text("อา.", size=12, text_align=ft.TextAlign.CENTER, color=ft.colors.RED_300, width=day_size),
+                content=ft.Text("อา.", size=12, text_align=ft.TextAlign.CENTER, color=ft.Colors.RED_300, width=day_size),
                 alignment=ft.alignment.center,
                 width=day_size),
             ft.Container(
@@ -113,31 +148,31 @@ def main(page: ft.Page):
                 alignment=ft.alignment.center,
                 width=day_size),
             ft.Container(
-                content=ft.Text("ส.", size=12, text_align=ft.TextAlign.CENTER, width=day_size, color=ft.colors.RED_300),
+                content=ft.Text("ส.", size=12, text_align=ft.TextAlign.CENTER, width=day_size, color=ft.Colors.RED_300),
                 alignment=ft.alignment.center,
                 width=day_size)
         ]
-        calendar_rows.controls.append(ft.Row(header, spacing=10, alignment=ft.MainAxisAlignment.CENTER))
+        self.calendar_rows.controls.append(ft.Row(header, spacing=10, alignment=ft.MainAxisAlignment.CENTER))
 
         for week in range(6):
             row = []
             for i in range(7):
                 day = start_day + timedelta(days=week * 7 + i)
-                if day.month == month:
-                    is_today = day.date() == today.date()
-                    is_selected = selected_date.value == day.strftime("%Y-%m-%d")
+                if day.month == self.current_month:
+                    is_today = day.date() == self.today.date()
+                    is_selected = self.selected_date.value == day.strftime("%Y-%m-%d")
                     is_leave = False
                     is_holiday = False
                     tooltip = ""
                     bg_color = None
 
-                    for l in leaves:
+                    for l in self.leaves:
                         if l["date"] == day.strftime("%Y-%m-%d"):
                             is_leave = True
                             tooltip = f"{LEAVE_TYPES.get(l['type'], '')}: {l['reason']}"
-                            bg_color = COLOR_MAP.get(l["type"], ft.colors.GREY_300)
+                            bg_color = COLOR_MAP.get(l["type"], ft.Colors.GREY_300)
 
-                    for h in holidays:
+                    for h in self.holidays:
                         if h["date"] == day.strftime("%Y-%m-%d"):
                             is_holiday = True
                             tooltip = f"วันหยุด: {h['name']}"
@@ -150,147 +185,152 @@ def main(page: ft.Page):
 
                     btn = ft.Container(
                         content=ft.Text(str(day.day), size=12),
-                        bgcolor=bg_color if bg_color else ft.colors.TRANSPARENT,
+                        bgcolor=bg_color if bg_color else ft.Colors.TRANSPARENT,
                         border_radius=day_size / 2,
                         tooltip=tooltip,
                         padding=0,
                         width=day_size,
                         height=day_size,
                         alignment=ft.alignment.center,
-                        on_click=lambda e, d=day: on_date_click(d)
+                        on_click=lambda e, d=day: self.on_date_click(d)
                     )
                 else:
                     btn = ft.Container(content=ft.Text(""), width=day_size, height=day_size)
                 row.append(btn)
-            calendar_rows.controls.append(ft.Row(row, spacing=10, alignment=ft.MainAxisAlignment.CENTER))
+            self.calendar_rows.controls.append(ft.Row(row, spacing=10, alignment=ft.MainAxisAlignment.CENTER))
 
-    def on_date_click(d):
-        selected_date.value = d.strftime("%Y-%m-%d")
-        refresh()
+        self.header_text.value = f"{get_month_label(self.current_month)} {self.current_year}"
 
-    def refresh():
-        build_calendar(current_year, current_month)
-        build_summary()
-        header_text.value = f"{get_month_label(current_month)} {current_year}"
-        page.update()
+    def build_summary(self):
 
-    def build_summary():
-        leave_summary.controls.clear()
+        self.leave_summary = ft.Column(
+            spacing=10,
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        )
+
         counts = {lt: 0 for lt in LEAVE_TYPES}
-        for l in leaves:
+        for l in self.leaves:
             if l["type"] in counts:
                 counts[l["type"]] += 1
-        for q in quotas:
+
+        for q in self.quotas:
             used = counts.get(q["type"], 0)
             remaining = q["total"] - used
-            leave_summary.controls.append(ft.Container(
-                content=ft.Text(f"{LEAVE_TYPES[q['type']]} เหลือ {remaining} วัน", size=12),
-                bgcolor=ft.colors.GREY_200,
-                padding=10,
-                border_radius=8
-            ))
+            self.leave_summary.controls.append(
+                ft.Container(
+                    content=ft.Text(f"{LEAVE_TYPES[q['type']]} เหลือ {remaining} วัน", size=12),
+                    bgcolor=ft.Colors.GREY_200,
+                    padding=10,
+                    border_radius=8,
+                    alignment=ft.alignment.center
+                )
+            )
 
-    def show_quota_popup(e):
-        inputs = []
-        for q in quotas:
-            tf = ft.TextField(label=f"{LEAVE_TYPES[q['type']]} (วัน)", value=str(q["total"]))
-            inputs.append((q["type"], tf))
+    def on_date_click(self, d):
+        self.selected_date.value = d.strftime("%Y-%m-%d")
+        self.refresh()
 
-        def close_popup(e=None):
-            page.dialog.open = False
-            page.update()
+    def on_add_leave(self, e):
+        if self.selected_date.value and self.leave_type_dd.value:
+            self.save_leave(datetime.fromisoformat(self.selected_date.value), self.leave_type_dd.value, self.reason_tf.value)
+            self.refresh()
 
-        content = ft.Stack([
+    def on_add_holiday(self, e):
+        if self.selected_date.value and self.holiday_name.value:
+            self.save_holiday(datetime.fromisoformat(self.selected_date.value), self.holiday_name.value)
+            self.refresh()
+
+    def show_quota_popup(self, e):
+        popup = QuotaPopup(self.quotas, 
+                        on_submit=self.on_quota_submit)
+        self.page.dialog = popup
+        popup.open = True
+        self.page.open(popup)
+        self.page.update()
+
+    def on_quota_submit(self, inputs):
+        for type_, field in inputs:
+            self.update_quota(type_, int(field.value))
+
+        self.page.dialog.open = False
+        self.page.update()
+        self.refresh()
+
+    def change_month(self, direction):
+        self.current_month += direction
+        if self.current_month > 12:
+            self.current_month = 1
+            self.current_year += 1
+        elif self.current_month < 1:
+            self.current_month = 12
+            self.current_year -= 1
+        self.refresh()
+
+    def refresh(self):
+        # self.load_data()
+        self.build_calendar()
+        self.build_summary()
+        self.page.update()
+
+    def main(self):
+        self.page.title = "ระบบบันทึกวันลา"
+        self.page.scroll = ft.ScrollMode.ALWAYS
+
+        self.load_data()
+        self.build_calendar()
+        self.build_summary()
+
+        self.page.add(
             ft.Container(
                 content=ft.Column([
+                    ft.Text("ระบบบันทึกวันลา", size=20, weight="bold", text_align=ft.TextAlign.CENTER),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.IconButton(ft.Icons.CHEVRON_LEFT, on_click=lambda e: self.change_month(-1)),
+                                self.header_text,
+                                ft.IconButton(ft.Icons.CHEVRON_RIGHT, on_click=lambda e: self.change_month(1)),
+                            ], alignment=ft.MainAxisAlignment.CENTER),
+                            self.calendar_rows,
+                        ]),
+                        padding=20,
+                        alignment=ft.alignment.center,
+                        width=float("inf")
+                    ),
+                    ft.Text("วันที่เลือก:", text_align=ft.TextAlign.CENTER),
+                    self.selected_date,
                     ft.Row([
-                        ft.Text("อัปเดตโควต้าการลา", size=16, weight="bold"),
-                        ft.IconButton(ft.icons.CLOSE, on_click=close_popup, tooltip="ปิด", style=ft.ButtonStyle(padding=5))
-                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                    ft.Column([inp[1] for inp in inputs], tight=True),
-                ]),
-                padding=20,
-                bgcolor=ft.colors.WHITE,
-                border_radius=10,
-                width=400
-            )
-        ])
-
-        page.dialog = ft.AlertDialog(
-            modal=True,
-            content=content,
-            actions=[
-                ft.TextButton("ยืนยัน", on_click=lambda e: [update_quota(t, int(f.value)) for t, f in inputs] or close_popup()),
-            ]
-        )
-        page.dialog.open = True
-        page.update()
-
-
-
-    def on_add_leave(e):
-        if selected_date.value and leave_type_dd.value:
-            save_leave(datetime.fromisoformat(selected_date.value), leave_type_dd.value, reason_tf.value)
-            refresh()
-
-    def on_add_holiday(e):
-        if selected_date.value and holiday_name.value:
-            save_holiday(datetime.fromisoformat(selected_date.value), holiday_name.value)
-            refresh()
-
-    def change_month(direction):
-        nonlocal current_month, current_year
-        current_month += direction
-        if current_month > 12:
-            current_month = 1
-            current_year += 1
-        elif current_month < 1:
-            current_month = 12
-            current_year -= 1
-        refresh()
-
-    page.scroll = ft.ScrollMode.ALWAYS
-    load_data()
-    page.add(
-        ft.Container(
-            content=ft.Column([
-                ft.Text("ระบบบันทึกวันลา", size=20, weight="bold", text_align=ft.TextAlign.CENTER),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Row([
-                            ft.IconButton(ft.icons.CHEVRON_LEFT, on_click=lambda e: change_month(-1)),
-                            header_text,
-                            ft.IconButton(ft.icons.CHEVRON_RIGHT, on_click=lambda e: change_month(1)),
-                        ], alignment=ft.MainAxisAlignment.CENTER),
-                        calendar_rows,
+                        self.leave_type_dd,
+                        self.reason_tf,
+                        ft.ElevatedButton("บันทีก", on_click=self.on_add_leave)
+                    ], alignment=ft.MainAxisAlignment.CENTER),
+                    ft.Row([
+                        self.holiday_name,
+                        ft.ElevatedButton("บันทึก", on_click=self.on_add_holiday)
+                    ], alignment=ft.MainAxisAlignment.CENTER),
+                    ft.Divider(),
+                    ft.Row([
+                        ft.Text("วันลาคงเหลือ", size=20, weight="bold", text_align=ft.TextAlign.CENTER),
+                        ft.ElevatedButton("อัปเดตโควต้าการลา", on_click=self.show_quota_popup, icon=ft.Icons.EDIT_CALENDAR),
                     ]),
-                    padding=20,
-                    alignment=ft.alignment.center,
-                    expand=False,
-                    width=float("inf")
-                ),
-                ft.Text("วันที่เลือก:", text_align=ft.TextAlign.CENTER),
-                selected_date,
-                ft.Row([
-                    leave_type_dd,
-                    reason_tf,
-                    ft.ElevatedButton("บันทึกวันลา", on_click=on_add_leave)
-                ], alignment=ft.MainAxisAlignment.CENTER),
-                ft.Row([
-                    holiday_name,
-                    ft.ElevatedButton("บันทึกวันหยุด", on_click=on_add_holiday)
-                ], alignment=ft.MainAxisAlignment.CENTER),
-                ft.Divider(),
-                ft.Container(leave_summary, padding=10),
-                ft.ElevatedButton("อัปเดตโควต้าการลา", on_click=show_quota_popup, icon=ft.icons.EDIT_CALENDAR),
-            ], scroll=ft.ScrollMode.AUTO, expand=True, alignment=ft.MainAxisAlignment.CENTER)
+                    ft.Container(
+                        content=self.leave_summary,
+                        padding=10,
+                        alignment=ft.alignment.center,
+                        width=float("inf")
+                    ),
+                    
+                ], alignment=ft.MainAxisAlignment.CENTER)
+            )
         )
-    )
-
-    refresh()
 
 
+def main(page: ft.Page):
+    app = LeaveApp(page)
+    app.main()
 
-if __name__ == '__main__':
 
-    ft.app(target=main, view=ft.WEB_BROWSER)
+if __name__ == "__main__":
+    import flet as ft
+    ft.app(target=main)
