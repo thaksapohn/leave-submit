@@ -1,6 +1,6 @@
+flet==0.27.6
+flet-web>=0.6.0
 fastapi
-flet-web
 uvicorn
-flet
 supabase
 python-dotenv
