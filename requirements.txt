@@ -1,4 +1,5 @@
 fastapi
+flet-web
 uvicorn
 flet
 supabase
