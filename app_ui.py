@@ -30,7 +30,7 @@ def get_month_label(month):
     ]
     return month_th[month - 1]
 
-def build_app(page: ft.Page):
+def main(page: ft.Page):
     today = datetime.today()
     current_year = today.year
     current_month = today.month
@@ -253,4 +253,4 @@ def build_app(page: ft.Page):
 
 if __name__ == '__main__':
 
-    ft.app(target=build_app, view=ft.WEB_BROWSER)
+    ft.app(target=main, view=ft.WEB_BROWSER)
