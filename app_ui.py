@@ -37,9 +37,13 @@ def main(page: ft.Page):
 
     selected_date = ft.Text("")
     calendar_rows = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True)
-    quota_controls = ft.Column()
-    leave_summary = ft.Text()
+    leave_summary = ft.Row(wrap=True, spacing=10, run_spacing=10, alignment=ft.MainAxisAlignment.CENTER)
     header_text = ft.Text(f"{get_month_label(current_month)} {current_year}", size=16)
+    
+    # Cache
+    leaves = []
+    holidays = []
+    quotas = []
 
     leave_type_dd = ft.Dropdown(
         label="ประเภทการลา",
@@ -51,30 +55,32 @@ def main(page: ft.Page):
     def fetch_table(table):
         return supabase.table(table).select("*").execute().data
 
+    def load_data():
+        nonlocal leaves, holidays, quotas
+        leaves = fetch_table("leaves")
+        holidays = fetch_table("holidays")
+        quotas = fetch_table("leave_quota")
+
     def save_leave(date, leave_type, reason):
         supabase.table("leaves").insert({
             "date": date.isoformat(),
             "type": leave_type,
             "reason": reason
         }).execute()
+        load_data()
 
     def save_holiday(date, name):
         supabase.table("holidays").insert({
             "date": date.isoformat(),
             "name": name
         }).execute()
+        load_data()
 
     def update_quota(type_, total):
         supabase.table("leave_quota").upsert({"type": type_, "total": total}).execute()
+        load_data()
 
-    def get_leaves_and_holidays():
-        return (
-            fetch_table("leaves"),
-            fetch_table("holidays"),
-            fetch_table("leave_quota")
-        )
-
-    def build_calendar(year, month, leaves, holidays):
+    def build_calendar(year, month):
         calendar_rows.controls.clear()
         first_day = datetime(year, month, 1)
         start_day = first_day - timedelta(days=(first_day.weekday() + 1) % 7)
@@ -163,31 +169,64 @@ def main(page: ft.Page):
         refresh()
 
     def refresh():
-        leaves, holidays, quotas = get_leaves_and_holidays()
-        build_calendar(current_year, current_month, leaves, holidays)
-        build_summary(leaves, quotas)
-        build_quota_controls(quotas)
+        build_calendar(current_year, current_month)
+        build_summary()
         header_text.value = f"{get_month_label(current_month)} {current_year}"
         page.update()
 
-    def build_summary(leaves, quotas):
+    def build_summary():
+        leave_summary.controls.clear()
         counts = {lt: 0 for lt in LEAVE_TYPES}
         for l in leaves:
             if l["type"] in counts:
                 counts[l["type"]] += 1
-        summary = []
         for q in quotas:
             used = counts.get(q["type"], 0)
             remaining = q["total"] - used
-            summary.append(f"{LEAVE_TYPES[q['type']]} เหลือ {remaining} วัน")
-        leave_summary.value = "\n".join(summary)
+            leave_summary.controls.append(ft.Container(
+                content=ft.Text(f"{LEAVE_TYPES[q['type']]} เหลือ {remaining} วัน", size=12),
+                bgcolor=ft.colors.GREY_200,
+                padding=10,
+                border_radius=8
+            ))
 
-    def build_quota_controls(quotas):
-        quota_controls.controls.clear()
+    def show_quota_popup(e):
+        inputs = []
         for q in quotas:
-            tf = ft.TextField(label=f"จำนวนวัน {LEAVE_TYPES[q['type']]}", value=str(q["total"]))
-            btn = ft.ElevatedButton("อัปเดต", on_click=lambda e, t=q["type"], f=tf: update_quota(t, int(f.value)) or refresh())
-            quota_controls.controls.append(ft.Row([tf, btn]))
+            tf = ft.TextField(label=f"{LEAVE_TYPES[q['type']]} (วัน)", value=str(q["total"]))
+            inputs.append((q["type"], tf))
+
+        def close_popup(e=None):
+            page.dialog.open = False
+            page.update()
+
+        content = ft.Stack([
+            ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Text("อัปเดตโควต้าการลา", size=16, weight="bold"),
+                        ft.IconButton(ft.icons.CLOSE, on_click=close_popup, tooltip="ปิด", style=ft.ButtonStyle(padding=5))
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Column([inp[1] for inp in inputs], tight=True),
+                ]),
+                padding=20,
+                bgcolor=ft.colors.WHITE,
+                border_radius=10,
+                width=400
+            )
+        ])
+
+        page.dialog = ft.AlertDialog(
+            modal=True,
+            content=content,
+            actions=[
+                ft.TextButton("ยืนยัน", on_click=lambda e: [update_quota(t, int(f.value)) for t, f in inputs] or close_popup()),
+            ]
+        )
+        page.dialog.open = True
+        page.update()
+
+
 
     def on_add_leave(e):
         if selected_date.value and leave_type_dd.value:
@@ -211,10 +250,11 @@ def main(page: ft.Page):
         refresh()
 
     page.scroll = ft.ScrollMode.ALWAYS
+    load_data()
     page.add(
         ft.Container(
             content=ft.Column([
-                ft.Text("ระบบบันทึกวันลา", size=20, weight="bold"),
+                ft.Text("ระบบบันทึกวันลา", size=20, weight="bold", text_align=ft.TextAlign.CENTER),
                 ft.Container(
                     content=ft.Column([
                         ft.Row([
@@ -229,21 +269,21 @@ def main(page: ft.Page):
                     expand=False,
                     width=float("inf")
                 ),
-                ft.Text("วันที่เลือก:"),
+                ft.Text("วันที่เลือก:", text_align=ft.TextAlign.CENTER),
                 selected_date,
                 ft.Row([
                     leave_type_dd,
                     reason_tf,
                     ft.ElevatedButton("บันทึกวันลา", on_click=on_add_leave)
-                ]),
+                ], alignment=ft.MainAxisAlignment.CENTER),
                 ft.Row([
                     holiday_name,
                     ft.ElevatedButton("บันทึกวันหยุด", on_click=on_add_holiday)
-                ]),
+                ], alignment=ft.MainAxisAlignment.CENTER),
                 ft.Divider(),
-                leave_summary,
-                quota_controls
-            ], scroll=ft.ScrollMode.AUTO, expand=True)
+                ft.Container(leave_summary, padding=10),
+                ft.ElevatedButton("อัปเดตโควต้าการลา", on_click=show_quota_popup, icon=ft.icons.EDIT_CALENDAR),
+            ], scroll=ft.ScrollMode.AUTO, expand=True, alignment=ft.MainAxisAlignment.CENTER)
         )
     )
 
