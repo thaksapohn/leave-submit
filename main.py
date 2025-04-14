@@ -7,4 +7,4 @@
 from flet.fastapi import app as flet_app
 from app_ui import main
 
-flet_app(main)
+app = flet_app(main)
